@@ -3,9 +3,9 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 const dotenv = require("dotenv");
 
-const User = require("./userSchema");
+const User = require("./UserSchema");
 const Item = require("./ItemSchema");
-const Order = require("./orderSchema");
+const Order = require("./OrderSchema");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 dotenv.config();
