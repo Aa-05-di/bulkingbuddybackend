@@ -24,6 +24,22 @@ const userSchema = new mongoose.Schema(
     password: { type: String, required: true, minLength: 6 },
     location: { type: String },
     cart: [cartItemSchema],
+
+    // ----- ADDED FOR AI WORKOUT PLANNER -----
+    workoutSplit: {
+      type: Map,
+      of: String,
+      default: {
+        'Sunday': 'Rest',
+        'Monday': 'Chest',
+        'Tuesday': 'Back',
+        'Wednesday': 'Legs',
+        'Thursday': 'Shoulders',
+        'Friday': 'Arms',
+        'Saturday': 'Rest',
+      }
+    }
+    // ----- END OF NEW SECTION -----
   },
   { timestamps: true }
 );

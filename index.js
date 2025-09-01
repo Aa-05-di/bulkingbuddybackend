@@ -6,6 +6,7 @@ const dotenv = require("dotenv");
 const User = require("./userSchema");
 const Item = require("./ItemSchema");
 const Order = require("./orderSchema");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 dotenv.config();
 
@@ -21,6 +22,8 @@ mongoose
   .connect(`mongodb+srv://aadithyanlearn:${process.env.MONGO}@cluster0.dhupojt.mongodb.net/RegList`)
   .then(() => console.log("Connected to MongoDB"))
   .catch((err) => console.error("Connection failed:", err));
+
+// ... (No changes in Auth, Items, Cart, Checkout, or Send Location sections)
 
 // ---------- Auth ----------
 app.post("/register", async (req, res) => {
@@ -310,7 +313,6 @@ app.post("/sendlocation", async (req, res) => {
 
 // ---------- Orders ----------
 // ----- ADDED FOR PENDING COUNT -----
-// New lightweight endpoint to get only the count of pending orders
 app.get("/receivedorders/pending-count/:sellerEmail", async (req, res) => {
   const { sellerEmail } = req.params;
   if (!sellerEmail) {
@@ -334,7 +336,6 @@ app.get("/receivedorders/pending-count/:sellerEmail", async (req, res) => {
     res.status(500).json({ message: "Server error fetching pending order count" });
   }
 });
-// ----- END OF ADDED SECTION -----
 
 app.get("/receivedorders/:sellerEmail", async (req, res) => {
   const sellerEmail = req.params.sellerEmail;
@@ -346,24 +347,21 @@ app.get("/receivedorders/:sellerEmail", async (req, res) => {
   try {
     const seller = await User.findOne({ email: sellerEmail });
     if (!seller) {
-      console.log(`Seller not found for email: ${sellerEmail}`);
       return res.status(404).json({ message: "Seller not found" });
     }
 
     const sellerItems = await Item.find({ seller: sellerEmail });
     if (sellerItems.length === 0) {
-      console.log(`No items found for seller email: ${sellerEmail}`);
       return res.status(200).json([]);
     }
 
     const sellerItemIds = sellerItems.map(item => item._id);
-    console.log(`Found item IDs for seller: ${sellerItemIds}`);
 
     const receivedOrders = await Order.find({
       "items.productId": { $in: sellerItemIds },
-    }).populate("user").populate("items.productId");
-
-    console.log(`Found ${receivedOrders.length} received orders.`);
+    })
+    .sort({ orderDate: -1 }) // Changed from createdAt to orderDate
+    .populate("user").populate("items.productId");
 
     res.status(200).json(receivedOrders);
 
@@ -387,6 +385,7 @@ app.get("/userorders/:userEmail", async (req, res) => {
     }
 
     const userOrders = await Order.find({ user: user._id })
+      .sort({ orderDate: -1 }) // Changed from createdAt to orderDate
       .populate("items.productId");
 
     res.status(200).json(userOrders);
@@ -396,6 +395,25 @@ app.get("/userorders/:userEmail", async (req, res) => {
   }
 });
 
+// ----- THIS IS THE TEMPORARY DEBUG ROUTE -----
+app.get("/debug/latest-order/:userEmail", async (req, res) => {
+  const { userEmail } = req.params;
+  try {
+    const user = await User.findOne({ email: userEmail });
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    const latestOrder = await Order.findOne({ user: user._id })
+      .sort({ orderDate: -1 }) // Changed from createdAt to orderDate
+      .populate("items.productId");
+    if (!latestOrder) {
+      return res.status(404).json({ message: "No orders found for this user at all." });
+    }
+    res.status(200).json(latestOrder);
+  } catch (e) {
+    res.status(500).json({ error: e.toString() });
+  }
+});
 
 // ---------- Profile ----------
 app.get("/profile/:email", async (req, res) => {
@@ -404,10 +422,9 @@ app.get("/profile/:email", async (req, res) => {
     const user = await User.findOne({ email }).populate("cart.productId");
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    // Find nearby items, but exclude items sold by the current user
     const nearbyItems = await Item.find({
       location: user.location,
-      seller: { $ne: email } // This is the new filter
+      seller: { $ne: email }
     });
 
     res.status(200).json({
@@ -420,6 +437,105 @@ app.get("/profile/:email", async (req, res) => {
   } catch (e) {
     console.error("Fetch profile error:", e);
     res.status(500).json({ message: "Server error fetching profile" });
+  }
+});
+
+app.get("/orders/proteintoday/:userEmail", async (req, res) => {
+  const { userEmail } = req.params;
+  if (!userEmail) {
+    return res.status(400).json({ message: "User email is required" });
+  }
+
+  try {
+    const user = await User.findOne({ email: userEmail });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const now = new Date();
+    const startOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
+    const endOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999));
+
+    const todaysOrders = await Order.find({
+      user: user._id,
+      orderDate: { $gte: startOfDay, $lt: endOfDay }, // Changed from createdAt to orderDate
+    }).populate("items.productId");
+
+    let totalProteinToday = 0;
+    for (const order of todaysOrders) {
+      for (const item of order.items) {
+        if (item.productId && item.productId.protein) {
+          const proteinValue = parseInt(item.productId.protein.replace(/[^0-9]/g, ''), 10) || 0;
+          totalProteinToday += proteinValue * item.quantity;
+        }
+      }
+    }
+    
+    res.status(200).json({ totalProteinToday });
+
+  } catch (e) {
+    console.error("Fetch protein today error:", e);
+    res.status(500).json({ message: "Server error fetching protein data" });
+  }
+});
+
+// ---------- AI Workout Planner ----------
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
+app.post("/generate-workout", async (req, res) => {
+  const { weight, proteinToday, userEmail } = req.body; 
+
+  if (!weight || proteinToday == null || !userEmail) {
+    return res.status(400).json({ message: "Weight, protein, and userEmail are required" });
+  }
+
+  try {
+    const user = await User.findOne({ email: userEmail });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const today = new Date().getDay();
+    const dayOfWeek = days[today];
+    const targetMuscleGroup = user.workoutSplit.get(dayOfWeek);
+    
+    if (targetMuscleGroup === 'Rest') {
+      return res.status(200).json({
+        fact: "Today is your scheduled rest day. Rest is crucial for muscle growth and recovery. Well done for staying consistent!",
+        exercises: [
+          { name: "Light Stretching", sets: "N/A", reps: "15-20 minutes" },
+          { name: "Stay Hydrated", sets: "N/A", reps: "Drink plenty of water" }
+        ]
+      });
+    }
+
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
+
+    const prompt = `
+      You are "Bulking Buddy," a motivating fitness coach.
+      A user who weighs ${weight} kg has consumed ${proteinToday}g of protein today. Their daily protein goal is approximately ${weight * 2}g.
+      Today is ${dayOfWeek}, which is the user's "${targetMuscleGroup} Day."
+
+      Generate a workout plan that focuses exclusively on ${targetMuscleGroup} exercises. The intensity and volume (sets/reps) should be influenced by their protein intake for the day.
+      
+      Your response MUST be a valid JSON object with NO extra text or markdown formatting.
+      The JSON object must have two keys:
+      1. "fact": A short, encouraging fact (as a string) that relates their protein intake to their ${targetMuscleGroup} workout potential.
+      2. "exercises": An array of JSON objects for the ${targetMuscleGroup} workout. Each object must have "name", "sets", and "reps" keys.
+    `;
+
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const text = response.text();
+    const cleanJsonText = text.replace(/```json/g, '').replace(/```/g, '').trim();
+    const workoutPlan = JSON.parse(cleanJsonText);
+
+    res.status(200).json(workoutPlan);
+
+  } catch (e) {
+    console.error("Gemini API error:", e);
+    res.status(500).json({ message: "Error generating workout plan from AI." });
   }
 });
 
