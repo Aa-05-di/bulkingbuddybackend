@@ -2,7 +2,6 @@ const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const dotenv = require("dotenv");
-
 const User = require("./UserSchema");
 const Item = require("./ItemSchema");
 const Order = require("./OrderSchema");
@@ -11,7 +10,7 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 dotenv.config();
 
 const app = express();
-const port = 8000;
+const port = 2000;
 
 // Middleware
 app.use(cors());
@@ -539,4 +538,4 @@ app.post("/generate-workout", async (req, res) => {
   }
 });
 
-app.listen(port, () => console.log(`Server running on port ${port}`));
+app.listen(port, '0.0.0.0', () => console.log(`Server running on port ${port}`));
