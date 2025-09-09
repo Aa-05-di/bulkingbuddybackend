@@ -63,13 +63,14 @@ app.post("/login", async (req, res) => {
 
 // ---------- Items ----------
 app.post("/additem", async (req, res) => {
-  const { photo, itemname, price, protein, seller, location } = req.body;
-  if (!itemname || price == null || !protein || !location) {
-    return res.status(400).json({ message: "Required fields are missing" });
+  // Now accepts 'quantity'
+  const { photo, itemname, price, protein, seller, location, quantity } = req.body;
+  if (!itemname || price == null || !protein || !location || quantity == null) {
+    return res.status(400).json({ message: "All fields including quantity are required" });
   }
 
   try {
-    const newItem = new Item({ photo, itemname, price, protein, seller, location });
+    const newItem = new Item({ photo, itemname, price, protein, seller, location, quantity });
     await newItem.save();
     res.status(200).json({ message: "Item added successfully", item: newItem });
   } catch (e) {
@@ -224,7 +225,7 @@ app.post("/updatecartquantity", async (req, res) => {
 
 // ---------- Checkout ----------
 app.post("/placeorder", async (req, res) => {
-  const { email, deliveryMethod } = req.body; 
+  const { email, deliveryMethod } = req.body;
   if (!email || !deliveryMethod) {
     return res.status(400).json({ message: "Email and delivery method are required" });
   }
@@ -234,37 +235,50 @@ app.post("/placeorder", async (req, res) => {
       return res.status(400).json({ message: "User or cart not found" });
     }
 
+    // 1. Verify stock for all items BEFORE creating the order
+    for (const cartItem of user.cart) {
+      const itemInDb = await Item.findById(cartItem.productId._id);
+      if (!itemInDb || itemInDb.quantity < cartItem.quantity) {
+        return res.status(400).json({
+          message: `Not enough stock for ${cartItem.productId.itemname}. Only ${itemInDb.quantity} left.`,
+        });
+      }
+    }
+
+    // 2. If stock is sufficient, proceed to decrement quantities and create order
     const deliveryCharge = 20.0;
     let itemsTotal = 0;
+    const itemsForOrder = [];
 
-    const itemsForOrder = user.cart.map(cartItem => {
+    for (const cartItem of user.cart) {
       const price = parseFloat(cartItem.productId.price);
       itemsTotal += price * cartItem.quantity;
-      return {
+      itemsForOrder.push({
         productId: cartItem.productId._id,
         quantity: cartItem.quantity,
-        priceAtPurchase: price
-      };
-    });
+        priceAtPurchase: price,
+      });
 
-    // Conditionally add delivery charge
-    const finalTotalAmount = deliveryMethod === 'Delivery' 
-      ? itemsTotal + deliveryCharge 
-      : itemsTotal;
+      // Decrement the stock in the database
+      await Item.updateOne(
+        { _id: cartItem.productId._id },
+        { $inc: { quantity: -cartItem.quantity } }
+      );
+    }
+
+    const finalTotalAmount = deliveryMethod === 'Delivery' ? itemsTotal + deliveryCharge : itemsTotal;
 
     const newOrder = new Order({
       user: user._id,
       items: itemsForOrder,
-      totalAmount: finalTotalAmount, // Use the correct final total
-      deliveryMethod: deliveryMethod, // Save the chosen method
+      totalAmount: finalTotalAmount,
+      deliveryMethod: deliveryMethod,
     });
     await newOrder.save();
 
     await User.updateOne({ email }, { $set: { cart: [] } });
-    res.status(200).json({
-      message: "Order placed successfully",
-      orderId: newOrder._id,
-    });
+    res.status(200).json({ message: "Order placed successfully" });
+
   } catch (e) {
     console.error("Place order error:", e);
     res.status(500).json({ message: "Server error placing order" });
@@ -434,7 +448,8 @@ app.get("/profile/:email", async (req, res) => {
 
     const nearbyItems = await Item.find({
       location: user.location,
-      seller: { $ne: email }
+      seller: { $ne: email },
+      quantity: { $gt: 0 },
     });
 
     res.status(200).json({

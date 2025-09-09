@@ -23,7 +23,13 @@ const itemSchema = new mongoose.Schema({
     location:{
         type:String,
         required:true,
-    }
+    },
+    quantity: {
+    type: Number,
+    required: true,
+    min: 0,
+    default: 0
+  },
 })
 
 module.exports = mongoose.model("Item",itemSchema);
