@@ -172,7 +172,7 @@ app.post("/removefromcart", async (req, res) => {
   }
 });
 
-// Set quantity (if <=0 -> remove line)
+
 app.post("/updatecartquantity", async (req, res) => {
   const { email, itemId, newQuantity } = req.body;
 
@@ -443,6 +443,7 @@ app.get("/profile/:email", async (req, res) => {
       location: user.location,
       cart: user.cart,
       nearbyItems,
+      workoutSplit: user.workoutSplit,
     });
   } catch (e) {
     console.error("Fetch profile error:", e);
@@ -486,6 +487,30 @@ app.get("/orders/proteintoday/:userEmail", async (req, res) => {
   } catch (e) {
     console.error("Fetch protein today error:", e);
     res.status(500).json({ message: "Server error fetching protein data" });
+  }
+});
+
+app.post("/update-workout-split", async (req, res) => {
+  const { email, newSplit } = req.body;
+  if (!email || !newSplit) {
+    return res.status(400).json({ message: "Email and newSplit are required" });
+  }
+  try {
+    const user = await User.findOneAndUpdate(
+      { email },
+      { $set: { workoutSplit: newSplit } },
+      { new: true } // Return the updated document
+    );
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    res.status(200).json({ 
+        message: "Workout split updated successfully", 
+        workoutSplit: user.workoutSplit 
+    });
+  } catch (e) {
+    console.error("Update workout split error:", e);
+    res.status(500).json({ message: "Server error updating workout split" });
   }
 });
 
