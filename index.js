@@ -78,6 +78,23 @@ app.post("/additem", async (req, res) => {
   }
 });
 
+app.delete("/orders/:orderId", async (req, res) => {
+  const { orderId } = req.params;
+  if (!orderId) {
+    return res.status(400).json({ message: "Order ID is required" });
+  }
+  try {
+    const result = await Order.findByIdAndDelete(orderId);
+    if (!result) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+    res.status(200).json({ message: "Order marked as delivered and removed." });
+  } catch (e) {
+    console.error("Delete order error:", e);
+    res.status(500).json({ message: "Server error deleting order" });
+  }
+});
+
 // ---------- Cart Helpers ----------
 async function getPopulatedCartByEmail(email) {
   const user = await User.findOne({ email }).populate("cart.productId");
@@ -203,24 +220,22 @@ app.post("/updatecartquantity", async (req, res) => {
 
 // ---------- Checkout ----------
 app.post("/placeorder", async (req, res) => {
-  const { email } = req.body;
-  if (!email) {
-    return res.status(400).json({ message: "Email is required" });
+  const { email, deliveryMethod } = req.body; 
+  if (!email || !deliveryMethod) {
+    return res.status(400).json({ message: "Email and delivery method are required" });
   }
   try {
     const user = await User.findOne({ email }).populate("cart.productId");
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
+    if (!user || user.cart.length === 0) {
+      return res.status(400).json({ message: "User or cart not found" });
     }
 
-    if (user.cart.length === 0) {
-      return res.status(400).json({ message: "Cart is empty" });
-    }
+    const deliveryCharge = 20.0;
+    let itemsTotal = 0;
 
-    let totalAmount = 0;
     const itemsForOrder = user.cart.map(cartItem => {
       const price = parseFloat(cartItem.productId.price);
-      totalAmount += price * cartItem.quantity;
+      itemsTotal += price * cartItem.quantity;
       return {
         productId: cartItem.productId._id,
         quantity: cartItem.quantity,
@@ -228,23 +243,24 @@ app.post("/placeorder", async (req, res) => {
       };
     });
 
+    // Conditionally add delivery charge
+    const finalTotalAmount = deliveryMethod === 'Delivery' 
+      ? itemsTotal + deliveryCharge 
+      : itemsTotal;
+
     const newOrder = new Order({
       user: user._id,
       items: itemsForOrder,
-      totalAmount: totalAmount,
+      totalAmount: finalTotalAmount, // Use the correct final total
+      deliveryMethod: deliveryMethod, // Save the chosen method
     });
     await newOrder.save();
 
-    await User.updateOne(
-      { email },
-      { $set: { cart: [] } }
-    );
-
+    await User.updateOne({ email }, { $set: { cart: [] } });
     res.status(200).json({
-      message: "Order placed and cart cleared successfully",
+      message: "Order placed successfully",
       orderId: newOrder._id,
     });
-
   } catch (e) {
     console.error("Place order error:", e);
     res.status(500).json({ message: "Server error placing order" });

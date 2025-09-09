@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const Schema = mongoose.Schema;
 
 const orderedItemSchema = new mongoose.Schema({
     productId: {
@@ -40,6 +41,14 @@ const orderSchema = new mongoose.Schema({
         type: String,
         default: null,
     },
+
+    deliveryMethod: {
+      type: String,
+      required: true,
+      enum: ['Delivery', 'Pickup'],
+      default: 'Delivery'
+    }
 });
 
 module.exports = mongoose.model("Order", orderSchema);
+
