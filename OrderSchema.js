@@ -48,7 +48,9 @@ const orderSchema = new mongoose.Schema({
       enum: ['Delivery', 'Pickup'],
       default: 'Delivery'
     },
-    timestamps: true
+},
+{
+    timestamps:true
 });
 
 module.exports = mongoose.model("Order", orderSchema);
