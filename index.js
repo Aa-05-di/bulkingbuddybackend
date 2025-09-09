@@ -409,7 +409,7 @@ app.get("/userorders/:userEmail", async (req, res) => {
     }
 
     const userOrders = await Order.find({ user: user._id })
-      .sort({ orderDate: -1 }) // Changed from createdAt to orderDate
+      .sort({ createdAt: -1 }) // Changed from createdAt to orderDate
       .populate("items.productId");
 
     res.status(200).json(userOrders);
@@ -484,7 +484,7 @@ app.get("/orders/proteintoday/:userEmail", async (req, res) => {
 
     const todaysOrders = await Order.find({
       user: user._id,
-      orderDate: { $gte: startOfDay, $lt: endOfDay }, // Changed from createdAt to orderDate
+      createdAt: { $gte: startOfDay, $lt: endOfDay }, 
     }).populate("items.productId");
 
     let totalProteinToday = 0;
