@@ -107,42 +107,31 @@ async function getPopulatedCartByEmail(email) {
   return { user, cart: user.cart };
 }
 
-// Add to cart (+=1 if exists, else push)
+
 app.post("/addtocart", async (req, res) => {
   const { email, itemId } = req.body;
-
-  if (!email || !itemId) {
-    return res.status(400).json({ message: "Email and Item ID are required" });
-  }
-
   try {
-    // Ensure item exists
     const item = await Item.findById(itemId);
-    if (!item) return res.status(404).json({ message: "Item not found" });
-
-    // Try to increment existing entry
+    if (!item) {
+      return res.status(404).json({ message: "Item not found" });
+    }
+    // Safety check: prevent adding out-of-stock items
+    if (item.quantity <= 0) {
+      return res.status(400).json({ message: `${item.itemname} is out of stock.` });
+    }
     const incResult = await User.updateOne(
       { email, "cart.productId": itemId },
       { $inc: { "cart.$.quantity": 1 } }
     );
-
     if (incResult.modifiedCount === 0) {
-      // Not found -> push a new cart line
       await User.updateOne(
         { email },
         { $push: { cart: { productId: itemId, quantity: 1 } } }
       );
     }
-
-    const data = await getPopulatedCartByEmail(email);
-    if (!data) return res.status(404).json({ message: "User not found" });
-
-    res.status(200).json({
-      message: "Cart updated successfully",
-      cart: data.cart,
-    });
+    const user = await User.findOne({ email }).populate("cart.productId");
+    res.status(200).json({ message: "Cart updated", cart: user.cart });
   } catch (e) {
-    console.error("Add to cart error:", e);
     res.status(500).json({ message: "Server error updating cart" });
   }
 });
@@ -409,7 +398,7 @@ app.get("/userorders/:userEmail", async (req, res) => {
     }
 
     const userOrders = await Order.find({ user: user._id })
-      .sort({ createdAt: -1 }) // Changed from createdAt to orderDate
+      .sort({ createdAt: -1 })
       .populate("items.productId");
 
     res.status(200).json(userOrders);
@@ -428,7 +417,7 @@ app.get("/debug/latest-order/:userEmail", async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
     const latestOrder = await Order.findOne({ user: user._id })
-      .sort({ orderDate: -1 }) // Changed from createdAt to orderDate
+      .sort({createdAt: -1 }) 
       .populate("items.productId");
     if (!latestOrder) {
       return res.status(404).json({ message: "No orders found for this user at all." });
@@ -449,7 +438,6 @@ app.get("/profile/:email", async (req, res) => {
     const nearbyItems = await Item.find({
       location: user.location,
       seller: { $ne: email },
-      quantity: { $gt: 0 },
     });
 
     res.status(200).json({
