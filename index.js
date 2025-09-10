@@ -112,13 +112,20 @@ app.post("/addtocart", async (req, res) => {
   const { email, itemId } = req.body;
   try {
     const item = await Item.findById(itemId);
-    if (!item) {
-      return res.status(404).json({ message: "Item not found" });
-    }
-    // Safety check: prevent adding out-of-stock items
+    if (!item) return res.status(404).json({ message: "Item not found" });
     if (item.quantity <= 0) {
       return res.status(400).json({ message: `${item.itemname} is out of stock.` });
     }
+    
+    // Check quantity in user's cart vs. available stock
+    const user = await User.findOne({ email });
+    const cartItem = user.cart.find(ci => ci.productId.toString() === itemId);
+    const quantityInCart = cartItem ? cartItem.quantity : 0;
+    
+    if (quantityInCart >= item.quantity) {
+        return res.status(400).json({ message: `No more stock available for ${item.itemname}.` });
+    }
+
     const incResult = await User.updateOne(
       { email, "cart.productId": itemId },
       { $inc: { "cart.$.quantity": 1 } }
@@ -129,8 +136,8 @@ app.post("/addtocart", async (req, res) => {
         { $push: { cart: { productId: itemId, quantity: 1 } } }
       );
     }
-    const user = await User.findOne({ email }).populate("cart.productId");
-    res.status(200).json({ message: "Cart updated", cart: user.cart });
+    const updatedUser = await User.findOne({ email }).populate("cart.productId");
+    res.status(200).json({ message: "Cart updated", cart: updatedUser.cart });
   } catch (e) {
     res.status(500).json({ message: "Server error updating cart" });
   }
@@ -428,6 +435,37 @@ app.get("/debug/latest-order/:userEmail", async (req, res) => {
   }
 });
 
+//For sellers to get their items
+app.get("/items/seller/:sellerEmail", async (req, res) => {
+  const { sellerEmail } = req.params;
+  try {
+    const items = await Item.find({ seller: sellerEmail }).sort({ quantity: -1 });
+    res.status(200).json(items);
+  } catch (e) {
+    res.status(500).json({ message: "Server error fetching seller items" });
+  }
+});
+
+
+// ----- NEW ENDPOINT FOR SELLERS TO UPDATE STOCK -----
+app.patch("/items/update-stock", async (req, res) => {
+  const { itemId, newQuantity } = req.body;
+  if (!itemId || newQuantity == null || newQuantity < 0) {
+    return res.status(400).json({ message: "Item ID and a valid quantity are required" });
+  }
+  try {
+    const updatedItem = await Item.findByIdAndUpdate(
+      itemId,
+      { $set: { quantity: newQuantity } },
+      { new: true }
+    );
+    if (!updatedItem) return res.status(404).json({ message: "Item not found" });
+    res.status(200).json({ message: "Stock updated successfully", item: updatedItem });
+  } catch (e) {
+    res.status(500).json({ message: "Server error updating stock" });
+  }
+});
+
 // ---------- Profile ----------
 app.get("/profile/:email", async (req, res) => {
   const email = req.params.email;
@@ -437,7 +475,14 @@ app.get("/profile/:email", async (req, res) => {
 
     const nearbyItems = await Item.find({
       location: user.location,
-      seller: { $ne: email },
+      seller: { $ne: email }
+    });
+
+    // Sort items to show in-stock items first, then out-of-stock items
+    nearbyItems.sort((a, b) => {
+      if (a.quantity > 0 && b.quantity <= 0) return -1;
+      if (a.quantity <= 0 && b.quantity > 0) return 1;
+      return 0;
     });
 
     res.status(200).json({
@@ -449,7 +494,6 @@ app.get("/profile/:email", async (req, res) => {
       workoutSplit: user.workoutSplit,
     });
   } catch (e) {
-    console.error("Fetch profile error:", e);
     res.status(500).json({ message: "Server error fetching profile" });
   }
 });
