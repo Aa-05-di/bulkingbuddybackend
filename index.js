@@ -22,7 +22,6 @@ mongoose
   .then(() => console.log("Connected to MongoDB"))
   .catch((err) => console.error("Connection failed:", err));
 
-// ... (No changes in Auth, Items, Cart, Checkout, or Send Location sections)
 
 // ---------- Auth ----------
 app.post("/register", async (req, res) => {
@@ -143,7 +142,7 @@ app.post("/addtocart", async (req, res) => {
   }
 });
 
-// Remove one line completely from cart
+
 app.post("/removefromcart", async (req, res) => {
   const { email, itemId } = req.body;
   if (!email || !itemId) {
@@ -546,7 +545,7 @@ app.post("/update-workout-split", async (req, res) => {
     const user = await User.findOneAndUpdate(
       { email },
       { $set: { workoutSplit: newSplit } },
-      { new: true } // Return the updated document
+      { new: true }
     );
     if (!user) {
       return res.status(404).json({ message: "User not found" });
@@ -565,7 +564,7 @@ app.post("/update-workout-split", async (req, res) => {
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 app.post("/generate-workout", async (req, res) => {
-  // Now accepts an optional 'eatenFood' string
+
   const { weight, proteinToday, userEmail, eatenFood } = req.body; 
 
   if (!weight || proteinToday == null || !userEmail) {
